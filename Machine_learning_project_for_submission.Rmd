@@ -1,0 +1,149 @@
+---
+title: "Machine learning project"
+author: "CPD"
+date: "2015. november 19."
+output: html_document
+---
+
+# Predicting the manner of an exercise with machine learning
+
+The goal of the project is to predict the manner in which the participants did the exercise. And detailing the following questions:
+* How you used cross validation?
+* What you think the expected out of sample error is?
+* And why you made the choices you did?
+* predict 20 different test cases.
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+# Data loading, exploration, pre processing
+
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+set.seed(1)
+
+testset <- read.csv("pml-testing.csv", na.strings=c("NA",""), header=TRUE)
+trainingset <- read.csv("pml-training.csv", na.strings=c("NA",""), header=TRUE)
+
+```
+### Drop unnecessary variables
+Decisions:
+Based on summary we have 19622 rows. Many has a lot of NA-s. The first 7 columns and the NA columns are should be dropped.
+```{R}
+
+#dropping the first 7 columns
+
+no_first_7_col_trs <- trainingset[8:160]
+no_first_7_col_tst <- testset[8:160]
+
+#dropping columns full of NA
+
+no_na_trainingset <- no_first_7_col_trs[, colSums(is.na(no_first_7_col_trs)) < nrow(no_first_7_col_trs)*0.90]
+no_na_test <- no_first_7_col_tst[, colSums(is.na(no_first_7_col_tst)) < nrow(no_first_7_col_tst)*0.90]
+```
+
+Further exploring the data there might be variables that have near zero variance, 
+```{r}
+nzv <- nearZeroVar(no_na_trainingset,saveMetrics=TRUE)
+```
+There isn't any because nzv coulmn is always false. The detailed list can be seen in the appendix.
+
+### Exploring Normality 
+
+I explore the distributions of the variables whether I need Box Cox transformation, to make them normal.
+
+Shapiro test shows (with small pvalues) that I can reject the null hypothesis that the variables are coming from a normally distributed source. The test result can be seen in the appendix.
+```{r}
+
+shapi<-apply(X=no_na_trainingset[1:5000,-53],MARGIN=2,FUN=shapiro.test)
+
+```
+Further viewing the histograms and qq plots the non normality is also can be seen. There are  many outliers too. 
+
+### Removing the outliers
+
+I removed the outliers. If there is one outlier in the given column then I remove that row from the entire table. I consider a value an outlier if it is further away from the mean than 3.5 SD.
+```{r}
+cut_trainingset <- no_na_trainingset
+for (i in seq(1, length(names(cut_trainingset))-1)){
+  #calculating the SD range is needed 
+  std_range_l <- mean(cut_trainingset[,i]) - sd(cut_trainingset[,i])*3.5
+  std_range_h <- mean(cut_trainingset[,i]) + sd(cut_trainingset[,i])*3.5
+  cut_trainingset<-cut_trainingset[cut_trainingset[,i] < std_range_h & cut_trainingset[,i] > std_range_l,]
+}
+
+```
+As the columns are free of outliers the now we have 17788 obs instead of 19622.
+
+
+### Creating test dataset
+I cut the training set into 80% train and 20% test set.
+```{r}
+inTrain <- createDataPartition(cut_trainingset$classe, p=0.8, list=FALSE)
+training <- cut_trainingset[inTrain, ]
+testing <- cut_trainingset[-inTrain, ]
+```
+
+
+# Training
+
+I have chosen Random forest model to predict so I use it to train first, which took a long time to execute therefore I saved it and reloaded the the generation of rmd.
+```{r}
+#training
+#trained2 <- train(x=training[, -53],y=training$classe,
+#                       method = "rf"
+#                );
+
+#Saving
+#saveRDS(trained2, "trained2.RDS")
+
+#Reloading
+trained2 = readRDS("trained2.RDS")
+trained2
+```
+
+# Testing the performance of the model
+I evaluate the performance of the model on the 20% test dataset.
+
+```{r}
+ predict_ontestset <- predict(trained2, testing)
+confusionMatrix(testing$classe, predict_ontestset)
+
+```
+The result on the test set has an accuracy of 0.9916. Which I consider to be good.
+
+Calculating the result for the exercise.
+```{r}
+
+predict_res2 <- predict(trained2, no_na_test)
+answers = as.character(predict_res2)
+```
+
+Generating the files for the submission.
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```
+All the results are good. 
+
+# Appendix
+### Near zero Variables
+```{r}
+nzv
+```
+### Shapio normality test
+
+```{r}
+for(i in seq(1, length(shapi))){
+  print(paste(names(shapi[i]), "p.value: ",shapi[[i]]$p.value)); 
+}
+```
